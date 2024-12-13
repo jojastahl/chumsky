@@ -16,6 +16,7 @@
 //! - [`end`]: parses the end of input (i.e: if there any more inputs, this parse fails)
 
 use super::*;
+use paste::paste;
 
 /// See [`end`].
 pub struct End<I, E>(EmptyPhantom<(E, I)>);
@@ -1111,4 +1112,175 @@ impl_group_for_tuple! {
     X_ OX
     Y_ OY
     Z_ OZ
+}
+
+/// See [`concat`].
+pub struct Concat<T, O, E> {
+    parsers: T,
+    _phantom: EmptyPhantom<(O, E)>,
+}
+
+impl<T: Copy, O, E> Copy for Concat<T, O, E> {}
+impl<T: Clone, O, E> Clone for Concat<T, O, E> {
+    fn clone(&self) -> Self {
+        Concat {
+            parsers: self.parsers.clone(),
+            _phantom: self._phantom,
+        }
+    }
+}
+
+/// Concat a tuple of parsers and build an iteratable [`IterParser`] that iterates over
+/// each of the parsers delivering their output. The parsers must all be [`IterParser`]s
+/// outputting the same type `O`.
+///
+/// Example:
+/// ```
+/// # use chumsky::prelude::*;
+/// use chumsky::text::digits;
+///
+/// let num = concat::<_, _, extra::Default>((
+///     one_of("+-").or_not(),
+///     digits(10).at_least(1),
+/// ))
+///     .collect::<String>()
+///     .from_str()
+///     .unwrapped();
+/// assert_eq!(
+///     num.parse("-5").into_result(),
+///     Ok(-5),
+/// );
+/// ```
+pub fn concat<T, O, E>(parsers: T) -> Concat<T, O, E>
+{
+    Concat{
+        parsers,
+        _phantom: EmptyPhantom::new(),
+    }
+}
+
+#[doc(hidden)]
+pub enum ConcatState<'src, I, O, E, M, P>
+where
+    M: Mode,
+    I: Input<'src>,
+    E: ParserExtra<'src, I>,
+    P: IterParser<'src, I, O, E>,
+{
+    Uninit,
+    Started(P::IterState<M>),
+    Exhausted,
+}
+
+fn do_concat_next<'src, I, O, E, M, P>(
+    parser: &P,
+    state: &mut ConcatState<'src, I, O, E, M, P>,
+    inp: &mut InputRef<'src, '_, I, E>
+) -> IPResult<M, O>
+where
+    I: Input<'src>,
+    E: ParserExtra<'src, I>,
+    P: IterParser<'src, I, O, E>,
+    M: Mode,
+{
+    match state {
+        ConcatState::Uninit => {
+            let mut iter_state = parser.make_iter::<M>(inp)?;
+            let result = parser.next(inp, &mut iter_state);
+            *state = ConcatState::Started(iter_state);
+            result
+        }
+        ConcatState::Started(iter_state) => {
+            let result = parser.next(inp, iter_state);
+            if result.as_ref().is_ok_and(Option::is_none) {
+                *state = ConcatState::Exhausted;
+            }
+            result
+        }
+        ConcatState::Exhausted => {
+            Ok(None)
+        }
+    }
+}
+
+macro_rules! impl_concat_out_uninit {
+    () => {};
+    ($X:ident) => { ConcatState::Uninit }
+}
+
+macro_rules! impl_concat_for_tuple {
+    () => {};
+    ($head:ident $($X:ident)*) => {
+        impl_concat_for_tuple!($($X)*);
+        impl_concat_for_tuple!(~ $head $($X)*);
+    };
+    (~ $($X:ident)*) => {
+        #[allow(unused_variables, non_snake_case)]
+        impl<'src, I, O, E, $($X),*> IterParser<'src, I, O, E> for Concat<($($X),*,), O, E>
+        where
+            $($X: IterParser<'src, I, O, E>),*,
+            I: Input<'src>,
+            E: ParserExtra<'src, I>,
+        {
+            type IterState<M: Mode> = (
+                $(ConcatState<'src, I, O, E, M, $X>),*,
+            );
+
+            const NONCONSUMPTION_IS_OK: bool = $($X::NONCONSUMPTION_IS_OK)||*;
+
+            fn make_iter<M: Mode>(
+                &self,
+                _inp: &mut InputRef<'src, '_, I, E>,
+            ) -> PResult<Emit, Self::IterState<M>> {
+                Ok(($(impl_concat_out_uninit!($X)),*,))
+            }
+
+            fn next<M: Mode>(
+                &self,
+                inp: &mut InputRef<'src, '_, I, E>,
+                state: &mut Self::IterState<M>,
+            ) -> IPResult<M, O> {
+                paste!{let ($(ref [< parser_ $X >]),*,) = self.parsers;}
+                paste!{let ($(ref mut [< state_ $X >]),*,) = state;}
+                let mut result: IPResult<M, O> = Ok(None);
+
+                $(
+                if result.as_ref().is_ok_and(Option::is_none) {
+                    paste!{result = do_concat_next([< parser_ $X >], [< state_ $X >], inp);}
+                }
+                )*
+
+                result
+            }
+        }
+    };
+}
+
+impl_concat_for_tuple! {
+    A_
+    B_
+    C_
+    D_
+    E_
+    F_
+    G_
+    H_
+    I_
+    J_
+    K_
+    L_
+    M_
+    N_
+    O_
+    P_
+    Q_
+    R_
+    S_
+    T_
+    U_
+    V_
+    W_
+    X_
+    Y_
+    Z_
 }

@@ -100,7 +100,7 @@ pub mod prelude {
         extra,
         input::Input,
         primitive::{
-            any, any_ref, choice, custom, empty, end, group, just, map_ctx, none_of, one_of, todo,
+            any, any_ref, choice, custom, empty, end, group, just, map_ctx, none_of, one_of, todo, concat,
         },
         recovery::{nested_delimiters, skip_then_retry_until, skip_until, via_parser},
         recursive::{recursive, Recursive},
