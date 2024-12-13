@@ -1437,6 +1437,42 @@ pub trait Parser<'src, I: Input<'src>, O, E: ParserExtra<'src, I> = extra::Defau
         }
     }
 
+    /// Parse a pattern exactly one time, turning the parser in an IterParser.
+    ///
+    /// This is shorthand for calling `repeated().exactly(1)`. Most useful with [`concat`].
+    ///
+    /// The output type of this parser is, by default, `()`. If you want to collect the items into a [`Container`]
+    /// (such as a [`Vec`]), use [`IterParser::collect`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use chumsky::{prelude::*};
+    /// let neg_num = concat::<_, _, extra::Default>((
+    ///     just('-').once(),
+    ///     text::digits(10),
+    /// ))
+    ///     .collect::<String>()
+    ///     .from_str()
+    ///     .unwrapped();
+    ///
+    /// assert_eq!(neg_num.parse("-100").into_result(), Ok(-100));
+    /// ```
+    #[cfg_attr(debug_assertions, track_caller)]
+    fn once(self) -> Repeated<Self, O, I, E>
+    where
+        Self: Sized,
+    {
+        Repeated {
+            parser: self,
+            at_least: 1,
+            at_most: 1,
+            #[cfg(debug_assertions)]
+            location: *Location::caller(),
+            phantom: EmptyPhantom::new(),
+        }
+    }
+
     /// Parse a pattern, separated by another, any number of times.
     ///
     /// You can use [`SeparatedBy::allow_leading`] or [`SeparatedBy::allow_trailing`] to allow leading or trailing
