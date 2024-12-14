@@ -1,5 +1,7 @@
 //! Utility items used throughout the crate.
 
+use ouroboros::self_referencing;
+
 use super::*;
 
 use core::{
@@ -220,5 +222,115 @@ impl<'src, T: 'src> IntoMaybe<'src, T> for T {
         g: impl FnOnce(T) -> R,
     ) -> Self::Proj<R> {
         g(self)
+    }
+}
+
+#[self_referencing]
+struct StringWithCharsIterImpl {
+    string: String,
+    #[borrows(string)]
+    #[covariant]
+    iter: core::str::Chars<'this>,
+}
+
+#[self_referencing]
+struct StringWithBytesIterImpl {
+    string: String,
+    #[borrows(string)]
+    #[covariant]
+    iter: core::str::Bytes<'this>,
+}
+
+/// Stores a string and its corresponding chars iterator
+pub struct StringWithCharsIter(StringWithCharsIterImpl);
+
+/// Stores a string and its corresponding bytes iterator
+pub struct StringWithBytesIter(StringWithBytesIterImpl);
+
+/// Stores a string slice and its corresponding chars iterator
+#[allow(dead_code)]
+pub struct StrSliceWithCharsIter<'a>(&'a str, core::str::Chars<'a>);
+
+/// Stores a string slice and its corresponding bytes iterator
+#[allow(dead_code)]
+pub struct StrSliceWithBytesIter<'a>(&'a str, core::str::Bytes<'a>);
+
+/// Trait providing a uniform interface for working with the iter
+/// stored in [`StringWithCharsIter`] or [`StrSliceWithCharsIter`]
+pub trait StrWithCharsIter {
+    /// Calls a closure with the chars iterator stored in self
+    fn with_iter_mut<'b, F, R>(&'b mut self, f: F) -> R
+    where
+        F: for<'c> FnOnce(&'b mut core::str::Chars<'c>) -> R;
+}
+
+/// Trait providing a uniform interface for working with the iter
+/// stored in [`StringWithBytesIter`] or [`StrSliceWithBytesIter`]
+pub trait StrWithBytesIter {
+    /// Calls a closure with the bytes iterator stored in self
+    fn with_iter_mut<'b, F, R>(&'b mut self, f: F) -> R
+    where
+        F: for<'c> FnOnce(&'b mut core::str::Bytes<'c>) -> R;
+}
+
+impl StringWithCharsIter {
+    pub(crate) fn new(str: String) -> Self {
+        StringWithCharsIter(StringWithCharsIterImpl::new(str, |str| str.chars()))
+    }
+}
+
+impl StrWithCharsIter for StringWithCharsIter {
+    fn with_iter_mut<'b, F, R>(&'b mut self, f: F) -> R
+    where
+        F: for<'c> FnOnce(&'b mut core::str::Chars<'c>) -> R,
+    {
+        self.0.with_iter_mut(f)
+    }
+}
+
+impl StringWithBytesIter {
+    pub(crate) fn new(str: String) -> Self {
+        StringWithBytesIter(StringWithBytesIterImpl::new(str, |str| str.bytes()))
+    }
+}
+
+impl StrWithBytesIter for StringWithBytesIter {
+    fn with_iter_mut<'b, F, R>(&'b mut self, f: F) -> R
+    where
+        F: for<'c> FnOnce(&'b mut core::str::Bytes<'c>) -> R,
+    {
+        self.0.with_iter_mut(f)
+    }
+}
+
+impl<'a> StrSliceWithCharsIter<'a> {
+    pub(crate) fn new(str: &'a str) -> Self {
+        let iter = str.chars();
+        StrSliceWithCharsIter(str, iter)
+    }
+}
+
+impl<'a> StrWithCharsIter for StrSliceWithCharsIter<'a> {
+    fn with_iter_mut<'b, F, R>(&'b mut self, f: F) -> R
+    where
+        F: for<'c> FnOnce(&'b mut core::str::Chars<'c>) -> R, // using 'c here so that the closure must note be specific to 'a
+    {
+        f(&mut self.1)
+    }
+}
+
+impl<'a> StrSliceWithBytesIter<'a> {
+    pub(crate) fn new(str: &'a str) -> Self {
+        let iter = str.bytes();
+        StrSliceWithBytesIter(str, iter)
+    }
+}
+
+impl<'a> StrWithBytesIter for StrSliceWithBytesIter<'a> {
+    fn with_iter_mut<'b, F, R>(&'b mut self, f: F) -> R
+    where
+        F: for<'c> FnOnce(&'b mut core::str::Bytes<'c>) -> R, // using 'c here so that the closure must note be specific to 'a
+    {
+        f(&mut self.1)
     }
 }

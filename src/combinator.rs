@@ -6,6 +6,7 @@
 //! when accessed through their respective methods on [`Parser`].
 
 use inspector::Inspector;
+use util::{StrSliceWithBytesIter, StrSliceWithCharsIter, StrWithBytesIter, StrWithCharsIter, StringWithBytesIter, StringWithCharsIter};
 
 use super::*;
 
@@ -682,6 +683,208 @@ where
         iter: &mut Self::IterState<M>,
     ) -> IPResult<M, O::Item> {
         Ok(iter.next().map(|out| M::bind(|| out)))
+    }
+}
+
+/// See [`StringCombinators::chars`]
+#[allow(dead_code)]
+pub struct IntoIterChars<A, I, O, E> {
+    parser: A,
+    phantom: EmptyPhantom<(I, O, E)>,
+}
+
+/// See [`StringCombinators::bytes`]
+#[allow(dead_code)]
+pub struct IntoIterBytes<A, I, O, E> {
+    parser: A,
+    phantom: EmptyPhantom<(I, O, E)>,
+}
+
+impl<A: Copy, I, O, E> Copy for IntoIterChars<A, I, O, E> {}
+impl<A: Clone, I, O, E> Clone for IntoIterChars<A, I, O, E> {
+    fn clone(&self) -> Self {
+        Self {
+            parser: self.parser.clone(),
+            phantom: EmptyPhantom::new(),
+        }
+    }
+}
+
+impl<A: Copy, I, O, E> Copy for IntoIterBytes<A, I, O, E> {}
+impl<A: Clone, I, O, E> Clone for IntoIterBytes<A, I, O, E> {
+    fn clone(&self) -> Self {
+        Self {
+            parser: self.parser.clone(),
+            phantom: EmptyPhantom::new(),
+        }
+    }
+}
+
+/// Trait implementing special combinators for Parsers with Strings as output.
+pub trait StringCombinators<I, O, E>
+where
+    Self: Sized,
+{
+    /// Returns a IterParser over the string chars.
+    ///
+    /// The output type of this IterParser is char.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use chumsky::{prelude::*};
+    /// let neg_num = concat::<_, _, extra::Default>((
+    ///     just("-").chars(),
+    ///     text::digits(10),
+    /// ))
+    ///     .collect::<String>()
+    ///     .from_str()
+    ///     .unwrapped();
+    ///
+    /// assert_eq!(neg_num.parse("-100").into_result(), Ok(-100));
+    /// ```
+    fn chars(self) -> IntoIterChars<Self, I, O, E>;
+
+    /// Returns a IterParser over the string bytes.
+    ///
+    /// The output type of this IterParser is byte.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use chumsky::{prelude::*};
+    /// let cstr = concat::<_, _, extra::Default>((
+    ///     just("01").bytes(),
+    ///     just('\0').to(0).once(),
+    /// ))
+    ///     .collect::<Vec<_>>();
+    ///
+    /// assert_eq!(cstr.parse("01\0").into_result(), Ok(vec![b'0', b'1', 0]));
+    /// ```
+    fn bytes(self) -> IntoIterBytes<Self, I, O, E>;
+}
+
+#[doc(hidden)]
+pub trait StringIntoIterStateBuilder<'a> {
+    type CharsIterState: StrWithCharsIter;
+    type BytesIterState: StrWithBytesIter;
+    fn make_chars_iter_state(self) -> Self::CharsIterState;
+    fn make_bytes_iter_state(self) -> Self::BytesIterState;
+}
+
+impl<'a> StringIntoIterStateBuilder<'a> for &'a str {
+    type CharsIterState = StrSliceWithCharsIter<'a>;
+    type BytesIterState = StrSliceWithBytesIter<'a>;
+
+    fn make_chars_iter_state(self) -> Self::CharsIterState {
+        Self::CharsIterState::new(self)
+    }
+
+    fn make_bytes_iter_state(self) -> Self::BytesIterState {
+        Self::BytesIterState::new(self)
+    }
+}
+
+impl<'a> StringIntoIterStateBuilder<'a> for String {
+    type CharsIterState = StringWithCharsIter;
+    type BytesIterState = StringWithBytesIter;
+
+    fn make_chars_iter_state(self) -> Self::CharsIterState {
+        Self::CharsIterState::new(self)
+    }
+
+    fn make_bytes_iter_state(self) -> Self::BytesIterState {
+        Self::BytesIterState::new(self)
+    }
+}
+
+impl<'src, A, I, O, E> StringCombinators<I, O, E> for A
+where
+    I: Input<'src>,
+    E: ParserExtra<'src, I>,
+    O: StringIntoIterStateBuilder<'src>,
+    A: Parser<'src, I, O, E>,
+{
+    #[inline]
+    fn chars(self) -> IntoIterChars<Self, I, O, E> {
+        IntoIterChars{
+            parser: self,
+            phantom: EmptyPhantom::new(),
+        }
+    }
+
+    #[inline]
+    fn bytes(self) -> IntoIterBytes<Self, I, O, E> {
+        IntoIterBytes{
+            parser: self,
+            phantom: EmptyPhantom::new(),
+        }
+    }
+}
+
+impl<'src, A, I, O, E> IterParser<'src, I, char, E> for IntoIterChars<A, I, O, E>
+where
+    I: Input<'src>,
+    E: ParserExtra<'src, I>,
+    O: StringIntoIterStateBuilder<'src>,
+    A: Parser<'src, I, O, E>,
+{
+    // TODO: Don't always produce output for non-emitting modes, but needed due to length. Use some way to 'select'
+    // between iterator and usize at compile time.
+    type IterState<M: Mode> = O::CharsIterState; //M::Output<O::IntoIter>;
+
+    const NONCONSUMPTION_IS_OK: bool = true;
+
+    #[inline(always)]
+    fn make_iter<M: Mode>(
+        &self,
+        inp: &mut InputRef<'src, '_, I, E>,
+    ) -> PResult<Emit, Self::IterState<M>> {
+        // M::map(self.parser.go::<M>(inp)?, |out| out.into_iter())
+        let value = self.parser.go::<Emit>(inp)?;
+        Ok(value.make_chars_iter_state())
+    }
+
+    #[inline(always)]
+    fn next<M: Mode>(
+        &self,
+        _inp: &mut InputRef<'src, '_, I, E>,
+        state: &mut Self::IterState<M>,
+    ) -> IPResult<M, char> {
+        Ok(state.with_iter_mut(|iter| iter.next().map(|out| M::bind(|| out))))
+    }
+}
+
+impl<'src, A, I, O, E> IterParser<'src, I, u8, E> for IntoIterBytes<A, I, O, E>
+where
+    I: Input<'src>,
+    E: ParserExtra<'src, I>,
+    O: StringIntoIterStateBuilder<'src>,
+    A: Parser<'src, I, O, E>,
+{
+    // TODO: Don't always produce output for non-emitting modes, but needed due to length. Use some way to 'select'
+    // between iterator and usize at compile time.
+    type IterState<M: Mode> = O::BytesIterState; //M::Output<O::IntoIter>;
+
+    const NONCONSUMPTION_IS_OK: bool = true;
+
+    #[inline(always)]
+    fn make_iter<M: Mode>(
+        &self,
+        inp: &mut InputRef<'src, '_, I, E>,
+    ) -> PResult<Emit, Self::IterState<M>> {
+        // M::map(self.parser.go::<M>(inp)?, |out| out.into_iter())
+        let value = self.parser.go::<Emit>(inp)?;
+        Ok(value.make_bytes_iter_state())
+    }
+
+    #[inline(always)]
+    fn next<M: Mode>(
+        &self,
+        _inp: &mut InputRef<'src, '_, I, E>,
+        state: &mut Self::IterState<M>,
+    ) -> IPResult<M, u8> {
+        Ok(state.with_iter_mut(|iter| iter.next().map(|out| M::bind(|| out))))
     }
 }
 
@@ -2843,5 +3046,27 @@ mod tests {
             parser.parse("-,-,-,").into_result(),
             Ok((vec!['-', '-', '-'], ',')),
         )
+    }
+
+    #[test]
+    fn just_string_chars() {
+        let neg_num = concat::<_, _, extra::Default>((
+            just("-".to_string()).chars(),
+            text::digits(10),
+        ))
+            .collect::<String>()
+            .from_str()
+            .unwrapped();
+        assert_eq!(neg_num.parse("-100").into_result(), Ok(-100));
+    }
+
+    #[test]
+    fn just_string_bytes() {
+        let cstr = concat::<_, _, extra::Default>((
+            just("01".to_string()).bytes(),
+            just('\0').to(0).once(),
+        ))
+            .collect::<Vec<_>>();
+        assert_eq!(cstr.parse("01\0").into_result(), Ok(vec![b'0', b'1', 0]));
     }
 }
