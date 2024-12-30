@@ -937,6 +937,55 @@ where
     }
 }
 
+/// See [`IterParser::cloned`]
+pub struct Cloned<A, OA> {
+    pub(crate) parser: A,
+    pub(crate) phantom: EmptyPhantom<OA>,
+}
+
+impl<A: Copy, OA> Copy for Cloned<A, OA> {}
+impl<A: Clone, OA> Clone for Cloned<A, OA> {
+    fn clone(&self) -> Self {
+        Self {
+            parser: self.parser.clone(),
+            phantom: self.phantom,
+        }
+    }
+}
+
+impl<'src, 'o, I, O, E, A> IterParser<'src, I, O, E> for Cloned<A, &'o O>
+where
+    O: 'o + Clone,
+    I: Input<'src>,
+    E: ParserExtra<'src, I>,
+    A: IterParser<'src, I, &'o O, E>,
+{
+    type IterState<M: Mode> = A::IterState<M>;
+
+    const NONCONSUMPTION_IS_OK: bool = A::NONCONSUMPTION_IS_OK;
+
+    #[inline(always)]
+    fn make_iter<M: Mode>(
+        &self,
+        inp: &mut InputRef<'src, '_, I, E>,
+    ) -> PResult<Emit, Self::IterState<M>> {
+        self.parser.make_iter(inp)
+    }
+
+    #[inline(always)]
+    fn next<M: Mode>(
+        &self,
+        inp: &mut InputRef<'src, '_, I, E>,
+        state: &mut Self::IterState<M>,
+    ) -> IPResult<M, O> {
+        match self.parser.next::<M>(inp, state) {
+            Ok(Some(v)) => Ok(Some(M::map(v, |v| v.clone()))),
+            Ok(None) => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+}
+
 /// See [`Parser::ignored`].
 pub struct Ignored<A, OA> {
     pub(crate) parser: A,
