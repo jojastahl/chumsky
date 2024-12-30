@@ -2489,6 +2489,38 @@ where
         }
     }
 
+    /// Creates an iterable parser which copies all of its output.
+    ///
+    /// This function behaves in a similar way to [`Iterator::copied`].
+    ///
+    /// The output type of this iterable parser is `*O`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use chumsky::{prelude::*, error::Simple};
+    /// let bytes = any::<_, extra::Err<Simple<char>>>()
+    ///     .filter(|x: &char| x.is_ascii_digit())
+    ///     .repeated()
+    ///     .to_slice()
+    ///     .map(|x: &str| x.as_bytes())
+    ///     .into_iter()
+    ///     .copied()
+    ///     .collect::<Vec<u8>>();
+    ///
+    /// assert_eq!(bytes.parse("2345").into_result(), Ok(vec![0x32, 0x33, 0x34, 0x35]));
+    /// ```
+    fn copied<'a, T>(self) -> Copied<Self, O>
+    where
+        T: 'a + Copy,
+        Self: Sized + IterParser<'src, I, &'a T, E>
+    {
+        Copied {
+            parser: self,
+            phantom: EmptyPhantom::new(),
+        }
+    }
+
     /// Right-fold the output of the parser into a single value.
     ///
     /// The output of the original parser must be of type `(impl IntoIterator<Item = A>, B)`. Because right-folds work
