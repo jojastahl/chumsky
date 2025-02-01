@@ -1187,7 +1187,11 @@ where
         ConcatState::Uninit => {
             let mut iter_state = parser.make_iter::<M>(inp)?;
             let result = parser.next(inp, &mut iter_state);
-            *state = ConcatState::Started(iter_state);
+            if result.as_ref().is_ok_and(Option::is_none) {
+                *state = ConcatState::Exhausted;
+            } else {
+                *state = ConcatState::Started(iter_state);
+            }
             result
         }
         ConcatState::Started(iter_state) => {
